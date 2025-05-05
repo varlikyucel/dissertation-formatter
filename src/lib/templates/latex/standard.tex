@@ -1,0 +1,64 @@
+\documentclass[12pt,oneside]{book}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{setspace}
+\usepackage{hyperref}
+
+% Setup page margins - standard 1 inch margins
+\geometry{letterpaper, margin=1in}
+
+% Double spacing
+\doublespacing
+
+% Allow for university, department info
+\providecommand{\university}[1]{\gdef\@university{#1}}
+\providecommand{\department}[1]{\gdef\@department{#1}}
+\providecommand{\@university}{University}
+\providecommand{\@department}{Department}
+
+% Customize title page
+\makeatletter
+\renewcommand{\maketitle}{
+  \begin{titlepage}
+    \begin{center}
+      \vspace*{1in}
+      {\LARGE\bfseries \@title}\\
+      \vspace{2cm}
+      A Dissertation Presented to\\
+      \vspace{0.5cm}
+      The Faculty of \@department\\
+      \@university\\
+      \vspace{2cm}
+      In Partial Fulfillment\\
+      Of the Requirements for the Degree\\
+      Doctor of Philosophy\\
+      \vspace{2cm}
+      By\\
+      \@author\\
+      \@date\\
+    \end{center}
+  \end{titlepage}
+}
+\makeatother
+
+\begin{document}
+
+% Title page
+%TITLE_PAGE%
+
+% Abstract
+%ABSTRACT%
+
+% Table of contents
+\tableofcontents
+\listoffigures
+\listoftables
+
+% Main content starts here
+%CONTENT%
+
+% Bibliography
+%BIBLIOGRAPHY%
+
+\end{document} 

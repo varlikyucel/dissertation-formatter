@@ -1,4 +1,4 @@
-# Dissertation Formatter
+# Dissertation Formatter *Work in Progress
 
 A web application that helps graduate students transform university-provided LaTeX templates into structured, well-formatted documents through an intuitive page-builder interface. By combining a block-based editor in React with a compilation pipeline, the app abstracts away LaTeX intricacies into simple drag-and-drop controls and real-time previews.
 

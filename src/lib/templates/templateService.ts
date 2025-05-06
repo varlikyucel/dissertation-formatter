@@ -1,6 +1,22 @@
 import fs from "fs";
 import path from "path";
-import { Block, Citation, Project, ChapterBlock, SectionBlock } from "../types";
+import {
+  Block,
+  BlockType,
+  Project,
+  Citation,
+  TitlePageBlock,
+  JuryApprovalBlock,
+  ChapterBlock,
+  SectionBlock,
+  FigureBlock,
+  TableBlock,
+  BibliographyBlock,
+  AbstractBlock,
+  AppendicesBlock,
+  CvBlock,
+  TurkishAbstractBlock,
+} from "../types";
 import os from "os";
 
 // Constants for template insertion points
@@ -79,12 +95,14 @@ export function generateBibTeX(citations: Citation[]): string {
 function generateTitlePage(block: Block): string {
   if (block.type !== "title-page") return "";
 
+  const titleBlock = block as TitlePageBlock;
+
   return `
-\\title{${block.title}}
-\\author{${block.author}}
-\\department{${block.department}}
-\\university{${block.university}}
-\\date{${block.date}}
+\\title{${titleBlock.title}}
+\\author{${titleBlock.author.name}}
+\\department{${titleBlock.department}}
+\\institute{${titleBlock.advisor.institution}}
+\\date{${titleBlock.submissionDate}}
 \\maketitle
   `.trim();
 }
@@ -122,15 +140,23 @@ function generateSection(block: Block): string {
 
   let command: string;
   switch (block.level) {
-    case 1:
+    case 2:
       command = "section";
       break;
-    case 2:
+    case 3:
       command = "subsection";
       break;
-    case 3:
+    case 4:
       command = "subsubsection";
       break;
+    case 5:
+      // For level 5, we use formatting with no numbering
+      // (handled in template with \setcounter{secnumdepth}{3})
+      return `
+{\\normalfont\\normalsize\\bfseries ${block.title}}
+
+${block.content}
+      `.trim();
     default:
       command = "section";
   }
@@ -290,196 +316,174 @@ export function copyItuTemplateFiles(workDir: string) {
       const sourcePath = path.join(templateDir, file);
       const destPath = path.join(workDir, file);
 
-      // --- DEBUG LOGGING ---
-      console.log(`Checking for essential file at source path: ${sourcePath}`);
-      // --- END DEBUG LOGGING ---
-
       if (fs.existsSync(sourcePath)) {
         fs.copyFileSync(sourcePath, destPath);
         console.log(`Copied template file: ${file}`);
       } else {
         // If template files don't exist, create minimal versions
-        console.log(`Template file ${file} not found, creating placeholder`);
-        if (file === "itutez.cls") {
-          // Create a minimal document class file
-          fs.writeFileSync(
-            destPath,
-            `\\NeedsTeXFormat{LaTeX2e}
-\\ProvidesClass{itutez}[2023/01/01 ITU Thesis Class]
-\\LoadClass[12pt,a4paper]{report}
-\\RequirePackage{geometry}
-\\geometry{margin=2.5cm}
-\\RequirePackage{graphicx}
-\\RequirePackage{natbib}
-\\newcommand{\\yazar}[2]{\\author{#1 #2}}
-\\newcommand{\\ogrencino}[1]{\\def\\@ogrencino{#1}}
-\\newcommand{\\unvan}[1]{\\def\\@unvan{#1}}
-\\newcommand{\\anabilimdali}[2]{\\def\\@anabilimdali{#2}}
-\\newcommand{\\programi}[2]{\\def\\@programi{#2}}
-\\newcommand{\\tarih}[2]{\\def\\@tarih{#2}}
-\\newcommand{\\tarihKucuk}[2]{\\def\\@tarihKucuk{#2}}
-\\newcommand{\\tezyoneticisi}[2]{\\def\\@tezyoneticisi{#1}\\def\\@tezyoneticisiUniv{#2}}
-\\newcommand{\\tezyoneticisiTR}[2]{\\def\\@tezyoneticisiTR{#1}\\def\\@tezyoneticisiUnivTR{#2}}
-\\newcommand{\\esdanismani}[2]{\\def\\@esdanismani{#1}\\def\\@esdanismaniUniv{#2}}
-\\newcommand{\\esdanismaniTR}[2]{\\def\\@esdanismaniTR{#1}\\def\\@esdanismaniUnivTR{#2}}
-\\newcommand{\\title}[3]{\\def\\@title{#1 #2 #3}}
-\\newcommand{\\baslikENG}[3]{\\def\\@baslikENG{#1 #2 #3}}
-\\newcommand{\\baslik}[3]{\\def\\@baslik{#1 #2 #3}}
-\\newcommand{\\tezvermetarih}[2]{\\def\\@tezvermetarih{#2}}
-\\newcommand{\\tezsavunmatarih}[2]{\\def\\@tezsavunmatarih{#2}}
-\\newcommand{\\juriBir}[2]{\\def\\@juriBir{#1}\\def\\@juriBirUniv{#2}}
-\\newcommand{\\juriIki}[2]{\\def\\@juriIki{#1}\\def\\@juriIkiUniv{#2}}
-\\newcommand{\\juriUc}[2]{\\def\\@juriUc{#1}\\def\\@juriUcUniv{#2}}
-\\newcommand{\\juriDort}[2]{\\def\\@juriDort{#1}\\def\\@juriDortUniv{#2}}
-\\newcommand{\\juriBes}[2]{\\def\\@juriBes{#1}\\def\\@juriBesUniv{#2}}
-\\newcommand{\\ithaf}[1]{\\def\\@ithaf{#1}}
-\\newcommand{\\onsoz}[1]{\\def\\@onsoz{#1}}
-\\newcommand{\\kisaltmalistesi}[1]{\\def\\@kisaltmalistesi{#1}}
-\\newcommand{\\sembollistesi}[1]{\\def\\@sembollistesi{#1}}
-\\newcommand{\\ozet}[1]{\\def\\@ozet{#1}}
-\\newcommand{\\summary}[1]{\\def\\@summary{#1}}
-\\newcommand{\\ozgecmis}[1]{\\def\\@ozgecmis{#1}}
-\\newcommand{\\eklerkapak}[1]{\\appendix}
-\\newcommand{\\eklerbolum}[1]{}
-\\begin{document}
-\\maketitle
-\\tableofcontents
-\\end{document}`
-          );
-        } else if (file === "defs.tex") {
-          fs.writeFileSync(
-            destPath,
-            `% Standard definitions for ITU thesis
-\\usepackage{amsmath,amssymb}
-\\usepackage{graphicx}
-\\usepackage{natbib}
-\\usepackage{hyperref}
-\\usepackage{tocloft}
-\\usepackage{afterpage}`
-          );
-        } else if (file === "itubib.bst") {
-          // Create a simple bibliography style file as before
-          fs.writeFileSync(
-            destPath,
-            `% ITU bibliography style file - minimal version`
-          );
-        }
+        console.error(
+          `Essential template file ${file} not found at ${sourcePath}, cannot proceed.`
+        );
+        // We should probably throw an error here instead of creating placeholders for essential files
+        throw new Error(`Essential template file not found: ${file}`);
       }
     }
 
-    // Create empty placeholder files with actual content
+    // Create empty placeholder files ONLY if they don't exist (prevents overwriting content files later)
     for (const file of placeholderFiles) {
       const filePath = path.join(workDir, file);
-      // Only create if it doesn't exist
       if (!fs.existsSync(filePath)) {
-        if (file === "tez.bib") {
-          // Create a minimal bibliography file with one sample entry
-          fs.writeFileSync(
-            filePath,
-            `@article{smith2020,
-  author = {Smith, John},
-  title = {Sample Article Title},
-  journal = {Journal of Examples},
-  year = {2020},
-  volume = {10},
-  number = {2},
-  pages = {123--145}
-}`
-          );
-        } else if (file === "ozet.tex") {
-          fs.writeFileSync(
-            filePath,
-            `Bu tez, placeholder metin içermektedir. Lütfen tezinizin özetini buraya ekleyin. Bu metin, gerçek bir özet değildir ve sadece şablon oluşturmak için kullanılmıştır.`
-          );
-        } else if (file === "summary.tex") {
-          fs.writeFileSync(
-            filePath,
-            `This thesis contains placeholder text. Please add your thesis summary here. This text is not a real summary and is used only for template generation.`
-          );
-        } else if (file === "onsoz.tex") {
-          fs.writeFileSync(
-            filePath,
-            `Bu tezin hazırlanmasında yardımlarını esirgemeyen değerli hocam ...`
-          );
-        } else if (file === "kisaltmalar.tex") {
-          fs.writeFileSync(
-            filePath,
-            `\\begin{array}{ll}
-ITU & Istanbul Technical University\\\\
-IEEE & Institute of Electrical and Electronics Engineers\\\\
-CPU & Central Processing Unit\\\\
-AI & Artificial Intelligence
-\\end{array}`
-          );
-        } else if (file === "semboller.tex") {
-          fs.writeFileSync(
-            filePath,
-            `\\begin{array}{ll}
-\\alpha & Alfa Katsayısı\\\\
-\\beta & Beta Katsayısı\\\\
-\\sigma & Sigma Değeri\\\\
-\\lambda & Lambda Değişkeni
-\\end{array}`
-          );
-        } else if (file === "eklerkapak.tex") {
-          fs.writeFileSync(
-            filePath,
-            `% This file is used as the appendix cover page.
-% The \\eklerkapak{} command in the main file triggers the appendix.`
-          );
-        } else if (file === "ekler.tex") {
-          fs.writeFileSync(
-            filePath,
-            `\\chapter{APPENDIX}
-This is a placeholder for your appendix content. Replace with your actual appendix.
-
-\\section{Sample Appendix Section}
-Sample appendix content goes here.`
-          );
-        } else if (file === "ozgecmis.tex") {
-          fs.writeFileSync(
-            filePath,
-            `Ad Soyad, 1990 yılında İstanbul'da doğdu. Lisans eğitimini ... Üniversitesi ... Bölümü'nde 2013 yılında tamamladı. 2014 yılında başladığı İstanbul Teknik Üniversitesi'ndeki yüksek lisans eğitimine devam etmektedir.`
-          );
-        } else {
-          // Create an empty file for other placeholders
-          fs.writeFileSync(
-            filePath,
-            `% This is a placeholder file for ${file}`
-          );
-        }
+        // Simplified: Just create empty files for these placeholders
+        // The actual content will be written by createItuContentFiles
+        fs.writeFileSync(filePath, `% Placeholder for ${file}`);
         console.log(`Created placeholder file: ${file}`);
       }
     }
 
-    // Create chapter files with minimal content
+    // Create chapter files placeholders ONLY if they don't exist
     for (const file of chapterFiles) {
       const filePath = path.join(workDir, file);
       if (!fs.existsSync(filePath)) {
-        const chapterNum = file.replace("ch", "").replace(".tex", "");
-        fs.writeFileSync(
-          filePath,
-          `\\chapter{Chapter ${chapterNum}}
-
-This is placeholder content for Chapter ${chapterNum}. Replace this with your actual content.
-
-\\section{Section 1}
-
-Sample text for Section 1.
-
-\\section{Section 2}
-
-Sample text for Section 2.`
-        );
-        console.log(`Created chapter file: ${file}`);
+        fs.writeFileSync(filePath, `% Placeholder for ${file}`);
+        console.log(`Created placeholder chapter file: ${file}`);
       }
     }
 
-    console.log("All ITU template files copied or created successfully");
+    console.log("Essential ITU template files copied successfully");
   } catch (error) {
     console.error("Error copying ITU template files:", error);
     throw error;
   }
+}
+
+/**
+ * Create content files for ITU template
+ */
+export function createItuContentFiles(workDir: string, project: Project) {
+  console.log("Creating ITU content files in:", workDir);
+
+  const { blocks } = project;
+  const sortedBlocks = [...blocks].sort((a, b) => a.order - b.order);
+
+  // Find blocks by type
+  const abstractBlock = sortedBlocks.find(
+    (block): block is AbstractBlock => block.type === "abstract"
+  );
+  const turkishAbstractBlock = sortedBlocks.find(
+    (block): block is TurkishAbstractBlock => block.type === "turkish-abstract"
+  );
+  const cvBlock = sortedBlocks.find(
+    (block): block is CvBlock => block.type === "cv"
+  );
+  const appendicesBlock = sortedBlocks.find(
+    (block): block is AppendicesBlock => block.type === "appendices"
+  );
+
+  // Create content files with proper content
+  if (abstractBlock?.content) {
+    console.log("Creating abstract file (summary.tex)");
+    fs.writeFileSync(path.join(workDir, "summary.tex"), abstractBlock.content);
+  }
+
+  if (turkishAbstractBlock?.content) {
+    console.log("Creating turkish abstract file (ozet.tex)");
+    fs.writeFileSync(
+      path.join(workDir, "ozet.tex"),
+      turkishAbstractBlock.content
+    );
+  } else if (abstractBlock?.content) {
+    // If no turkish abstract but abstract exists, use abstract as turkish abstract too
+    console.log("No turkish abstract found, using abstract for ozet.tex");
+    fs.writeFileSync(path.join(workDir, "ozet.tex"), abstractBlock.content);
+  }
+
+  if (cvBlock?.content) {
+    console.log("Creating CV file (ozgecmis.tex)");
+    fs.writeFileSync(path.join(workDir, "ozgecmis.tex"), cvBlock.content);
+  }
+
+  if (appendicesBlock?.content) {
+    console.log("Creating appendices file (ekler.tex)");
+    fs.writeFileSync(path.join(workDir, "ekler.tex"), appendicesBlock.content);
+  }
+
+  // Create chapter files
+  const chapterBlocks = sortedBlocks.filter(
+    (block): block is ChapterBlock => block.type === "chapter"
+  );
+
+  for (let i = 0; i < Math.min(chapterBlocks.length, 6); i++) {
+    const chapterNum = i + 1;
+    const chapterBlock = chapterBlocks[i];
+    let chapterContent = `\\chapter{${chapterBlock.title}}\n\n${
+      chapterBlock.content || ""
+    }`;
+
+    // Add section content to chapter
+    const sectionBlocks = sortedBlocks.filter(
+      (block): block is SectionBlock =>
+        block.type === "section" &&
+        sortedBlocks.findIndex((b) => b.id === block.id) >
+          sortedBlocks.findIndex((b) => b.id === chapterBlock.id) &&
+        (i === chapterBlocks.length - 1 ||
+          sortedBlocks.findIndex((b) => b.id === block.id) <
+            sortedBlocks.findIndex((b) => b.id === chapterBlocks[i + 1]?.id))
+    );
+
+    for (const block of sectionBlocks) {
+      let sectionCmd = "section";
+      if (block.level === 2) sectionCmd = "subsection";
+      if (block.level === 3) sectionCmd = "subsubsection";
+      chapterContent += `\n\n\\${sectionCmd}{${block.title}}\n\n${
+        block.content || ""
+      }`;
+    }
+
+    console.log(`Creating chapter file ch${chapterNum}.tex`);
+    fs.writeFileSync(path.join(workDir, `ch${chapterNum}.tex`), chapterContent);
+  }
+
+  // Create empty chapter files for any chapters that don't exist up to 6
+  for (let i = chapterBlocks.length; i < 6; i++) {
+    const chapterNum = i + 1;
+    const filePath = path.join(workDir, `ch${chapterNum}.tex`);
+    if (!fs.existsSync(filePath)) {
+      const emptyChapterContent = `\\chapter{Chapter ${chapterNum} (Empty)}
+
+% This chapter is required by the ITU template but has no content in your document structure.`;
+      console.log(`Creating empty chapter file ch${chapterNum}.tex`);
+      fs.writeFileSync(filePath, emptyChapterContent);
+    }
+  }
+
+  // Ensure placeholder files exist if not created by content blocks
+  const requiredPlaceholders = [
+    "onsoz.tex",
+    "kisaltmalar.tex",
+    "semboller.tex",
+    "ozet.tex", // Ensure these exist even if abstractBlock is null
+    "summary.tex", // Ensure these exist even if summaryBlock/abstractBlock is null
+    "eklerkapak.tex",
+    "ekler.tex", // Ensure this exists even if appendicesBlock is null
+    "ozgecmis.tex", // Ensure this exists even if cvBlock is null
+  ];
+
+  for (const file of requiredPlaceholders) {
+    const filePath = path.join(workDir, file);
+    if (!fs.existsSync(filePath)) {
+      // Use minimal placeholder content from copyItuTemplateFiles logic (or just empty comment)
+      let content = `% Placeholder for ${file}`;
+      // Add specific minimal content if necessary based on copyItuTemplateFiles placeholders
+      if (file === "onsoz.tex")
+        content =
+          "Bu tezin hazırlanmasında yardımlarını esirgemeyen değerli hocam ...";
+      // Add others as needed...
+      fs.writeFileSync(filePath, content);
+      console.log(`Ensuring placeholder file exists: ${file}`);
+    }
+  }
+
+  console.log("All ITU content files created successfully");
 }
 
 /**
@@ -496,7 +500,9 @@ function generateItuTemplate(project: Project): string {
     (block) => block.type === "title-page"
   );
   const abstractBlock = sortedBlocks.find((block) => block.type === "abstract");
-  const summaryBlock = sortedBlocks.find((block) => block.type === "summary");
+  const turkishAbstractBlock = sortedBlocks.find(
+    (block) => block.type === "turkish-abstract"
+  );
   const appendicesBlock = sortedBlocks.find(
     (block) => block.type === "appendices"
   );
@@ -517,10 +523,10 @@ function generateItuTemplate(project: Project): string {
 \\documentclass[onluarkali,ingilizce,yukseklisans,bez,LisansustuEgitim]{itutez}
 
 % Define author information
-\\yazar{${titlePageBlock?.author.split(" ")[0] || "Name"}}{${
-    titlePageBlock?.author.split(" ")[1]?.toUpperCase() || "SURNAME"
+\\yazar{${titlePageBlock?.author.name.split(" ")[0] || "Name"}}{${
+    titlePageBlock?.author.name.split(" ")[1]?.toUpperCase() || "SURNAME"
   }}
-\\ogrencino{${titlePageBlock?.studentId || "123456789"}}
+\\ogrencino{${titlePageBlock?.author.studentId || "123456789"}}
 
 % Define department and program
 \\anabilimdali{Department Turkish}{${
@@ -529,19 +535,33 @@ function generateItuTemplate(project: Project): string {
 \\programi{Program Turkish}{${titlePageBlock?.program || "Science Program"}}
 
 % Define dates
-\\tarih{MONTH YEAR IN TURKISH}{${titlePageBlock?.date || "January 2024"}}
+\\tarih{MONTH YEAR IN TURKISH}{${
+    titlePageBlock?.submissionDate || "January 2024"
+  }}
 \\tarihKucuk{month year in Turkish}{${
-    titlePageBlock?.date?.toLowerCase() || "january 2024"
+    titlePageBlock?.submissionDate?.toLowerCase() || "january 2024"
   }}
 
 % Define advisor information
-\\tezyoneticisi{Prof. Dr. Advisor Name}{Istanbul Technical University}
-\\tezyoneticisiTR{Prof. Dr. Advisor Name TR}{İstanbul Teknik Üniversitesi}
-\\unvan{Prof. Dr.}
+\\tezyoneticisi{${titlePageBlock?.advisor?.title || "Prof. Dr."} ${
+    titlePageBlock?.advisor?.name || "Advisor Name"
+  }}{${titlePageBlock?.advisor?.institution || "Istanbul Technical University"}}
+\\tezyoneticisiTR{${titlePageBlock?.advisor?.title || "Prof. Dr."} ${
+    titlePageBlock?.advisor?.name || "Advisor Name TR"
+  }}{İstanbul Teknik Üniversitesi}
+\\unvan{${titlePageBlock?.advisor?.title || "Prof. Dr."}}
 
 % Define co-advisor information (if any)
-\\esdanismani{}{} 
-\\esdanismaniTR{}{}
+\\esdanismani{${
+    titlePageBlock?.coAdvisor
+      ? `${titlePageBlock.coAdvisor.title} ${titlePageBlock.coAdvisor.name}`
+      : ""
+  }}{${titlePageBlock?.coAdvisor?.institution || ""}} 
+\\esdanismaniTR{${
+    titlePageBlock?.coAdvisor
+      ? `${titlePageBlock.coAdvisor.title} ${titlePageBlock.coAdvisor.name}`
+      : ""
+  }}{${titlePageBlock?.coAdvisor ? "İstanbul Teknik Üniversitesi" : ""}}
 
 % Define thesis title
 \\title{${titlePageBlock?.title || "Thesis Title"}}{}{} 
@@ -549,8 +569,12 @@ function generateItuTemplate(project: Project): string {
 \\baslik{Thesis Title in Turkish}{}{} 
 
 % Define submission and defense dates
-\\tezvermetarih{22 September 2024}{22 September 2024}
-\\tezsavunmatarih{21 December 2024}{21 December 2024}
+\\tezvermetarih{${titlePageBlock?.submissionDate || "22 September 2024"}}{${
+    titlePageBlock?.submissionDate || "22 September 2024"
+  }}
+\\tezsavunmatarih{${titlePageBlock?.defenseDate || "21 December 2024"}}{${
+    titlePageBlock?.defenseDate || "21 December 2024"
+  }}
 
 % Define jury members
 \\juriBir{Prof. Dr. Name SURNAME}{University Name}
@@ -699,19 +723,21 @@ export function generateLaTeXDocument(project: Project): string {
   );
 
   // Additional blocks for ITU template
-  const summaryBlock = sortedBlocks.find((block) => block.type === "summary");
+  const turkishAbstractBlock = sortedBlocks.find(
+    (block) => block.type === "turkish-abstract"
+  );
   const appendicesBlock = sortedBlocks.find(
     (block) => block.type === "appendices"
   );
   const cvBlock = sortedBlocks.find((block) => block.type === "cv");
 
-  // Content blocks (everything except title page, abstract, bibliography, summary, appendices, cv)
+  // Content blocks (everything except title page, abstract, bibliography, turkish-abstract, appendices, cv)
   const contentBlocks = sortedBlocks.filter(
     (block) =>
       block.type !== "title-page" &&
       block.type !== "abstract" &&
       block.type !== "bibliography" &&
-      block.type !== "summary" &&
+      block.type !== "turkish-abstract" &&
       block.type !== "appendices" &&
       block.type !== "cv"
   );
@@ -722,16 +748,16 @@ export function generateLaTeXDocument(project: Project): string {
       // For ITU template, replace individual fields
       templateContent = templateContent
         .replace(TITLE_MARKER, titlePageBlock.title)
-        .replace(AUTHOR_MARKER, titlePageBlock.author)
+        .replace(AUTHOR_MARKER, titlePageBlock.author.name || "")
         .replace(DEPARTMENT_MARKER, titlePageBlock.department)
-        .replace(DATE_MARKER, titlePageBlock.date);
+        .replace(DATE_MARKER, titlePageBlock.submissionDate || "");
 
       // Set default values for ITU-specific fields if not provided
       templateContent = templateContent
-        .replace(STUDENT_ID_MARKER, titlePageBlock.studentId || "")
+        .replace(STUDENT_ID_MARKER, titlePageBlock.author.studentId || "")
         .replace(PROGRAM_MARKER, titlePageBlock.program || "")
-        .replace(SUPERVISOR_MARKER, titlePageBlock.supervisor || "")
-        .replace(DEGREE_MARKER, titlePageBlock.degree || "Master of Science");
+        .replace(SUPERVISOR_MARKER, titlePageBlock.advisor?.name || "")
+        .replace(DEGREE_MARKER, "Master of Science");
     } else {
       // For standard template, use the title page marker
       templateContent = templateContent.replace(
@@ -767,11 +793,17 @@ export function generateLaTeXDocument(project: Project): string {
 
   // Handle ITU-specific blocks
   if (template === "itu") {
-    // Replace summary content
-    if (summaryBlock && summaryBlock.content) {
+    // Replace turkish-abstract content as summary
+    if (turkishAbstractBlock && turkishAbstractBlock.content) {
       templateContent = templateContent.replace(
         SUMMARY_MARKER,
-        summaryBlock.content
+        turkishAbstractBlock.content
+      );
+    } else if (abstractBlock && abstractBlock.content) {
+      // Fallback to abstract
+      templateContent = templateContent.replace(
+        SUMMARY_MARKER,
+        abstractBlock.content
       );
     } else {
       templateContent = templateContent.replace(SUMMARY_MARKER, "");

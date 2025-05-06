@@ -34,7 +34,9 @@ function createItuContentFiles(workDir: string, project: Project) {
 
   // Find blocks by type
   const abstractBlock = sortedBlocks.find((block) => block.type === "abstract");
-  const summaryBlock = sortedBlocks.find((block) => block.type === "summary");
+  const turkishAbstractBlock = sortedBlocks.find(
+    (block) => block.type === "turkish-abstract"
+  );
   const cvBlock = sortedBlocks.find((block) => block.type === "cv");
   const appendicesBlock = sortedBlocks.find(
     (block) => block.type === "appendices"
@@ -45,8 +47,8 @@ function createItuContentFiles(workDir: string, project: Project) {
     fs.writeFileSync(path.join(workDir, "ozet.tex"), abstractBlock.content);
   }
 
-  if (summaryBlock) {
-    fs.writeFileSync(path.join(workDir, "summary.tex"), summaryBlock.content);
+  if (abstractBlock) {
+    fs.writeFileSync(path.join(workDir, "summary.tex"), abstractBlock.content);
   }
 
   if (cvBlock) {
@@ -81,10 +83,16 @@ function createItuContentFiles(workDir: string, project: Project) {
     for (const block of sectionBlocks) {
       if (block.type === "section") {
         let sectionCmd = "section";
-        if (block.level === 2) sectionCmd = "subsection";
-        if (block.level === 3) sectionCmd = "subsubsection";
+        if (block.level === 2) sectionCmd = "section";
+        if (block.level === 3) sectionCmd = "subsection";
+        if (block.level === 4) sectionCmd = "subsubsection";
 
-        chapterContent += `\n\n\\${sectionCmd}{${block.title}}\n\n${block.content}`;
+        // Handle level 5 (no numbering)
+        if (block.level === 5) {
+          chapterContent += `\n\n{\\normalfont\\normalsize\\bfseries ${block.title}}\n\n${block.content}`;
+        } else {
+          chapterContent += `\n\n\\${sectionCmd}{${block.title}}\n\n${block.content}`;
+        }
       }
     }
 

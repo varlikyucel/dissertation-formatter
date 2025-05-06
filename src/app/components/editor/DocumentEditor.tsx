@@ -405,42 +405,47 @@ const DocumentEditor = () => {
       // Save the project first
       await saveProject();
 
-      // Get the export zip file
-      const response = await axios.post(
-        "/api/export",
-        { projectId: project.id },
-        {
-          responseType: "blob",
-        }
-      );
+      // Send the full project to the overleaf API
+      const overleafResponse = await axios.post("/api/overleaf", {
+        project: project,
+      });
 
-      // Convert to base64
-      const reader = new FileReader();
-      reader.readAsDataURL(response.data);
-      reader.onloadend = async () => {
-        const base64data = reader.result as string;
-        // Strip off the data URL prefix
-        const base64Content = base64data.split(",")[1];
+      // Create a hidden form to submit to Overleaf
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = "https://www.overleaf.com/docs";
+      form.target = "_blank";
+      form.style.display = "none";
 
-        // Send to Overleaf
-        try {
-          const overleafResponse = await axios.post("/api/overleaf", {
-            projectName: project.title || "Dissertation",
-            zipContent: base64Content,
-          });
+      // Add the snip_uri as a hidden field
+      const snipUriField = document.createElement("input");
+      snipUriField.type = "hidden";
+      snipUriField.name = "snip_uri";
+      snipUriField.value = overleafResponse.data.snip_uri;
+      form.appendChild(snipUriField);
 
-          // Open the Overleaf link in a new tab
-          window.open(overleafResponse.data.url, "_blank");
-        } catch (error) {
-          console.error("Overleaf API error:", error);
-          setError("Failed to open in Overleaf. Please try again.");
-        }
+      // Optionally add project name if you want to set the initial name in Overleaf
+      if (overleafResponse.data.projectName) {
+        const nameField = document.createElement("input");
+        nameField.type = "hidden";
+        nameField.name = "snip_name";
+        nameField.value = overleafResponse.data.projectName;
+        form.appendChild(nameField);
+      }
 
-        setOverleafLoading(false);
-      };
+      // Append the form to the body and submit it
+      document.body.appendChild(form);
+      form.submit();
+
+      // Remove the form after submission
+      setTimeout(() => {
+        document.body.removeChild(form);
+      }, 100);
+
+      setOverleafLoading(false);
     } catch (error) {
-      console.error("Export error:", error);
-      setError("Failed to export the document. Please try again.");
+      console.error("Overleaf API error:", error);
+      setError("Failed to open in Overleaf. Please try again.");
       setOverleafLoading(false);
     }
   };

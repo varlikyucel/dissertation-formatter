@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { DragDropContext, DropResult } from "@hello-pangea/dnd";
 import { useDocumentStore } from "@/lib/store";
 import BlockList from "../blocks/BlockList";
-import BlockEditor from "../../components/editor/BlockEditor";
+import BlockEditor from "../editor/BlockEditor";
 import ReferenceManager from "../citation/ReferenceManager";
 import LivePreview from "../preview/LivePreview";
 import {
@@ -15,9 +15,13 @@ import {
   SectionBlock,
   FigureBlock,
   TableBlock,
-  SummaryBlock,
   AppendicesBlock,
   CvBlock,
+  AVAILABLE_TEMPLATES,
+  DedicationBlock,
+  ListOfFiguresBlock,
+  ListOfTablesBlock,
+  ListOfAbbreviationsBlock,
 } from "@/lib/types";
 import axios from "axios";
 
@@ -33,37 +37,63 @@ const DocumentEditor = () => {
     setLoading,
     setError,
     saveProject,
+    isLoading,
+    error,
+    resetStore,
   } = useDocumentStore();
 
   const [activeTab, setActiveTab] = useState<
     "blocks" | "references" | "preview"
   >("blocks");
 
-  const [latexStatus, setLatexStatus] = useState<
-    "unchecked" | "checking" | "found" | "not-found"
-  >("unchecked");
-
-  const [testCompileStatus, setTestCompileStatus] = useState<
-    "idle" | "loading" | "success" | "error"
-  >("idle");
-  const [testError, setTestError] = useState<string | null>(null);
-
-  const [diagnostics, setDiagnostics] = useState<any>(null);
-  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
-
   const [latexSource, setLatexSource] = useState<string | null>(null);
   const [latexSourceLoading, setLatexSourceLoading] = useState(false);
-
   const [overleafLoading, setOverleafLoading] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+
+  // Get current template config
+  const templateConfig = project?.template
+    ? AVAILABLE_TEMPLATES.find((t) => t.id === project.template)
+    : null;
+
+  // Group block types for the add menu
+  const blockMenuCategories = [
+    {
+      name: "Structure",
+      types: [
+        "title-page",
+        "abstract",
+        "acknowledgments",
+        "dedication",
+        "chapter",
+        "section",
+      ],
+    },
+    {
+      name: "Content",
+      types: ["paragraph", "figure", "table", "code", "equation"],
+    },
+    {
+      name: "Lists",
+      types: [
+        "list-of-figures",
+        "list-of-tables",
+        "list-of-abbreviations",
+        "glossary",
+      ],
+    },
+    {
+      name: "Back Matter",
+      types: ["bibliography", "appendix", "appendices", "cv"],
+    },
+  ];
 
   useEffect(() => {
     if (!project) {
-      // Redirect to project selection or creation if no project is loaded
       return;
     }
   }, [project]);
 
-  // Handle drag-and-drop reordering
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return;
 
@@ -72,753 +102,739 @@ const DocumentEditor = () => {
 
     if (sourceIndex === destinationIndex) return;
 
-    reorderBlocks(sourceIndex, destinationIndex);
-  };
+    // Get the block being moved
+    if (project) {
+      const movedBlock = project.blocks[sourceIndex];
+      const isSectionMove = movedBlock.type === "section";
 
-  // Handle adding a new block
-  const handleAddBlock = (type: BlockType) => {
-    // Create appropriate block data based on type
-    if (type === "title-page") {
-      const blockData: Partial<TitlePageBlock> = {
-        title: "My Dissertation",
-        author: "Author Name",
-        department: "Department of Science",
-        university: "University Name",
-        date: new Date().toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "long",
-        }),
-        // Additional fields for ITU template
-        studentId: "",
-        program: "",
-        supervisor: "",
-        degree: "Master of Science",
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else if (type === "chapter") {
-      const blockData: Partial<ChapterBlock> = {
-        title: "New Chapter",
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else if (type === "section") {
-      const blockData: Partial<SectionBlock> = {
-        title: "New Section",
-        level: 1,
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else if (type === "figure") {
-      const blockData: Partial<FigureBlock> = {
-        caption: "Figure Caption",
-        label: "fig:label",
-        imagePath: "",
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else if (type === "table") {
-      const blockData: Partial<TableBlock> = {
-        caption: "Table Caption",
-        label: "tab:label",
-        data: [
-          ["Header 1", "Header 2"],
-          ["Data 1", "Data 2"],
-        ],
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else if (type === "summary") {
-      const blockData: Partial<SummaryBlock> = {
-        content: "Enter your thesis summary here (required for ITU template).",
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else if (type === "appendices") {
-      const blockData: Partial<AppendicesBlock> = {
-        content: "Enter your appendices content here.",
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else if (type === "cv") {
-      const blockData: Partial<CvBlock> = {
-        content: "Enter your curriculum vitae here.",
-      };
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    } else {
-      // Abstract and bibliography don't need special fields
-      const blockData: Partial<Block> = {};
-      const newBlockId = addBlock(blockData, type);
-      selectBlock(newBlockId);
-    }
-  };
+      // Store the current state to detect hierarchy changes
+      const currentLevel = isSectionMove
+        ? (movedBlock as SectionBlock).level
+        : null;
+      const currentParentId = isSectionMove
+        ? (movedBlock as SectionBlock).parentId
+        : null;
 
-  // Handle compiling the document to PDF
-  const handleCompile = async () => {
-    if (!project) return;
+      // Perform the reordering
+      reorderBlocks(sourceIndex, destinationIndex);
 
-    setLoading(true);
-    setError(null);
+      // If it's a section, it might have changed its hierarchy
+      if (isSectionMove) {
+        setTimeout(() => {
+          // Now check if there were hierarchy changes (the store update happens asynchronously)
+          if (project.blocks) {
+            const updatedBlock = project.blocks.find(
+              (b) => b.id === movedBlock.id
+            );
+            if (updatedBlock && updatedBlock.type === "section") {
+              const newLevel = (updatedBlock as SectionBlock).level;
+              const newParentId = (updatedBlock as SectionBlock).parentId;
 
-    try {
-      // Save project first
-      await saveProject();
+              // Check if hierarchy changed
+              if (
+                newLevel !== currentLevel ||
+                newParentId !== currentParentId
+              ) {
+                // Show a notification about the hierarchy adjustment
+                setError(
+                  "Section hierarchy was adjusted to maintain proper document structure"
+                );
 
-      // Compile the document
-      const response = await axios.post(
-        "/api/compile",
-        { project },
-        {
-          responseType: "blob",
-        }
-      );
-
-      // Create a URL for the PDF blob
-      const pdfBlob = new Blob([response.data], { type: "application/pdf" });
-      const url = URL.createObjectURL(pdfBlob);
-
-      setPreviewUrl(url);
-      setActiveTab("preview");
-    } catch (error: any) {
-      console.error("Compilation error:", error);
-
-      // Try to get detailed error info from response
-      if (error.response?.data) {
-        try {
-          // Convert blob to text to get error details
-          const reader = new FileReader();
-          reader.onload = () => {
-            try {
-              const errorText = reader.result as string;
-              const errorData = JSON.parse(errorText);
-              let errorMessage = errorData.error;
-
-              if (errorData.details) {
-                errorMessage += `\n\nDetails: ${errorData.details}`;
+                // Auto-clear the message after 3 seconds
+                setTimeout(() => {
+                  setError(null);
+                }, 3000);
               }
-
-              if (errorData.logExcerpt) {
-                errorMessage += `\n\nLog excerpt:\n${errorData.logExcerpt}`;
-              }
-
-              setError(errorMessage);
-              console.log("Detailed error:", errorData);
-            } catch (parseError) {
-              console.error("Error parsing error details:", parseError);
-              setError("Failed to parse error details");
             }
-          };
-          reader.readAsText(error.response.data);
-        } catch (e) {
-          console.error("Error reading error response:", e);
-          setError("Failed to compile document. Check console for details.");
-        }
-      } else {
-        setError(error.message || "Failed to compile document");
+          }
+        }, 100); // Small delay to ensure store is updated
       }
-    } finally {
-      setLoading(false);
+    } else {
+      // Just reorder if no project is available
+      reorderBlocks(sourceIndex, destinationIndex);
     }
   };
 
-  // Handle exporting the project
+  const handleAddBlock = (type: BlockType) => {
+    // Close the add menu
+    setAddMenuOpen(false);
+
+    switch (type) {
+      case "title-page": {
+        const blockData: Partial<TitlePageBlock> = {
+          title: "My Dissertation",
+          author: {
+            name: "Author Name",
+            studentId: "",
+          },
+          department: "Department of Science",
+          program: "",
+          submissionDate: new Date().toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+          }),
+          defenseDate: "",
+          advisor: {
+            title: "Prof. Dr.",
+            name: "Advisor Name",
+            institution: "University Name",
+          },
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "dedication": {
+        const blockData: Partial<DedicationBlock> = {
+          content: "Enter your dedication here.",
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "chapter": {
+        const blockData: Partial<ChapterBlock> = {
+          title: "New Chapter",
+          content: "Enter your chapter content here.",
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "section": {
+        const blockData: Partial<SectionBlock> = {
+          title: "New Section",
+          level: 2,
+          content: "Enter your section content here.",
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "figure": {
+        // Find potential parent chapters/sections like we do for paragraphs
+        const potentialParents = project?.blocks.filter(
+          (b) => b.type === "chapter" || b.type === "section"
+        );
+
+        // Find the selected block if it's a section or chapter
+        const selectedParent = selectedBlockId
+          ? project?.blocks.find(
+              (b) =>
+                b.id === selectedBlockId &&
+                (b.type === "chapter" || b.type === "section")
+            )
+          : null;
+
+        // If a section/chapter is selected, use it as parent
+        const parentId =
+          selectedParent?.id ||
+          (potentialParents && potentialParents.length > 0
+            ? potentialParents[potentialParents.length - 1].id
+            : undefined);
+
+        const blockData: Partial<FigureBlock> = {
+          caption: "Figure Caption",
+          label: "fig:example",
+          imagePath: "",
+          content: "Description of the figure.",
+          parentId,
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "table": {
+        const potentialParents = project?.blocks.filter(
+          (b) => b.type === "chapter" || b.type === "section"
+        );
+
+        const selectedParent = selectedBlockId
+          ? project?.blocks.find(
+              (b) =>
+                b.id === selectedBlockId &&
+                (b.type === "chapter" || b.type === "section")
+            )
+          : null;
+
+        const parentId =
+          selectedParent?.id ||
+          (potentialParents && potentialParents.length > 0
+            ? potentialParents[potentialParents.length - 1].id
+            : undefined);
+
+        const blockData: Partial<TableBlock> = {
+          caption: "Table Caption",
+          label: "tab:example",
+          data: [
+            ["Header 1", "Header 2", "Header 3"],
+            ["Cell 1-1", "Cell 1-2", "Cell 1-3"],
+            ["Cell 2-1", "Cell 2-2", "Cell 2-3"],
+          ],
+          content: "Description of the table.",
+          parentId,
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "appendices": {
+        const blockData: Partial<AppendicesBlock> = {
+          // Remove the 'title' property which doesn't exist in AppendicesBlock type
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "cv": {
+        const blockData: Partial<CvBlock> = {
+          content: "Enter your CV here.",
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "list-of-figures": {
+        const blockData: Partial<ListOfFiguresBlock> = {};
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "list-of-tables": {
+        const blockData: Partial<ListOfTablesBlock> = {};
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      case "list-of-abbreviations": {
+        const blockData: Partial<ListOfAbbreviationsBlock> = {
+          // Fix the property name to match the type definition
+          abbreviations: [
+            { term: "e.g.", definition: "For example" },
+            { term: "i.e.", definition: "That is" },
+          ],
+        };
+        const newBlockId = addBlock(blockData, type);
+        selectBlock(newBlockId);
+        break;
+      }
+
+      default: {
+        // Add a generic block
+        const newBlockId = addBlock({}, type);
+        selectBlock(newBlockId);
+      }
+    }
+  };
+
   const handleExport = async () => {
     if (!project) return;
 
-    setLoading(true);
-
     try {
-      // Save project first
+      setLoading(true);
+
+      // First save the project to make sure we have the latest version
       await saveProject();
 
-      // Export the project as a ZIP file
       const response = await axios.post(
         "/api/export",
-        { project },
+        { projectId: project.id },
         {
           responseType: "blob",
         }
       );
 
-      // Create a download link for the ZIP
-      const zipBlob = new Blob([response.data], { type: "application/zip" });
-      const url = URL.createObjectURL(zipBlob);
+      // Convert response to a blob URL
+      const blob = new Blob([response.data], {
+        type: "application/zip",
+      });
+      const url = window.URL.createObjectURL(blob);
 
-      // Create a temporary anchor element to trigger the download
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${project.title}.zip`;
-      document.body.appendChild(a);
-      a.click();
+      // Create a link element to download the file
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${project.title || "document"}.zip`);
+      document.body.appendChild(link);
+      link.click();
 
-      // Clean up
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
+      // Cleanup
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setLoading(false);
     } catch (error) {
       console.error("Export error:", error);
-      setError("Failed to export project");
-    } finally {
+      setError("Failed to export the document. Please try again.");
       setLoading(false);
     }
   };
 
-  // Handle checking LaTeX installation
-  const checkLatexInstallation = async () => {
-    setLatexStatus("checking");
-    setError(null);
-
-    try {
-      const response = await axios.get("/api/check-latex");
-      if (response.data.installed) {
-        setLatexStatus("found");
-      } else {
-        setLatexStatus("not-found");
-        setError(
-          "LaTeX (pdflatex) is not installed or not in PATH. Please install MiKTeX and restart your computer before trying again."
-        );
-      }
-    } catch (error) {
-      console.error("Error checking LaTeX:", error);
-      setLatexStatus("not-found");
-      setError(
-        "Failed to check LaTeX installation. Please make sure MiKTeX is installed properly."
-      );
-    }
-  };
-
-  // Handle test compilation of a minimal LaTeX document
-  const handleTestCompile = async () => {
-    setTestCompileStatus("loading");
-    setTestError(null);
-
-    try {
-      const response = await axios.get("/api/test-compile", {
-        responseType: "blob",
-      });
-
-      // Create a URL for the PDF blob
-      const pdfBlob = new Blob([response.data], { type: "application/pdf" });
-      const url = URL.createObjectURL(pdfBlob);
-
-      setPreviewUrl(url);
-      setActiveTab("preview");
-      setTestCompileStatus("success");
-    } catch (error: any) {
-      console.error("Test compilation error:", error);
-      setTestCompileStatus("error");
-
-      // Try to get detailed error info from response
-      if (error.response?.data) {
-        try {
-          // Convert blob to text to get error details
-          const reader = new FileReader();
-          reader.onload = () => {
-            try {
-              const errorText = reader.result as string;
-              const errorData = JSON.parse(errorText);
-              setTestError(
-                errorData.details || "Failed to compile test document"
-              );
-              console.log("Detailed error:", errorData);
-            } catch (parseError) {
-              console.error("Error parsing error details:", parseError);
-              setTestError("Failed to parse error details");
-            }
-          };
-          reader.readAsText(error.response.data);
-        } catch (e) {
-          console.error("Error reading error blob:", e);
-          setTestError("Failed to read error details");
-        }
-      } else {
-        setTestError(error.message || "Failed to compile test document");
-      }
-    }
-  };
-
-  // Run detailed LaTeX diagnostics
-  const runLatexDiagnostics = async () => {
-    setDiagnosticsLoading(true);
-    setDiagnostics(null);
-
-    try {
-      const response = await axios.get("/api/latex-debug");
-      setDiagnostics(response.data);
-    } catch (error) {
-      console.error("Diagnostics error:", error);
-      setTestError("Failed to run LaTeX diagnostics");
-    } finally {
-      setDiagnosticsLoading(false);
-    }
-  };
-
-  // View the generated LaTeX source code
   const viewLatexSource = async () => {
     if (!project) return;
 
-    setLatexSourceLoading(true);
-
     try {
-      const response = await axios.post("/api/preview-latex", { project });
-      setLatexSource(response.data.latex);
+      setLatexSourceLoading(true);
+      const response = await axios.post("/api/latex", {
+        projectId: project.id,
+      });
+
+      setLatexSource(response.data.source);
+      setLatexSourceLoading(false);
     } catch (error) {
-      console.error("Error fetching LaTeX source:", error);
-      setError("Failed to generate LaTeX source");
-    } finally {
+      console.error("LaTeX error:", error);
+      setError("Failed to generate LaTeX source. Please try again.");
       setLatexSourceLoading(false);
     }
   };
 
-  // Handle exporting the project to Overleaf
   const handleOpenInOverleaf = async () => {
     if (!project) return;
 
-    setOverleafLoading(true);
-    setError(null);
-
     try {
-      // Save project first (optional, but good practice)
+      setOverleafLoading(true);
+
+      // Save the project first
       await saveProject();
 
-      // Get the Overleaf data URL
-      console.log("Requesting Overleaf export data...");
-      const response = await axios.post("/api/overleaf", { project });
-      const { dataUrl } = response.data;
+      // Get the export zip file
+      const response = await axios.post(
+        "/api/export",
+        { projectId: project.id },
+        {
+          responseType: "blob",
+        }
+      );
 
-      if (!dataUrl) {
-        throw new Error("No data URL received from Overleaf API");
-      }
+      // Convert to base64
+      const reader = new FileReader();
+      reader.readAsDataURL(response.data);
+      reader.onloadend = async () => {
+        const base64data = reader.result as string;
+        // Strip off the data URL prefix
+        const base64Content = base64data.split(",")[1];
 
-      console.log("Received Overleaf data URL (length):", dataUrl.length);
+        // Send to Overleaf
+        try {
+          const overleafResponse = await axios.post("/api/overleaf", {
+            projectName: project.title || "Dissertation",
+            zipContent: base64Content,
+          });
 
-      // Construct the final Overleaf URL
-      // IMPORTANT: The dataUrl itself needs to be URL encoded
-      // const overleafUrl = `https://www.overleaf.com/docs?snip_uri=${encodeURIComponent(
-      //   dataUrl
-      // )}`;
+          // Open the Overleaf link in a new tab
+          window.open(overleafResponse.data.url, "_blank");
+        } catch (error) {
+          console.error("Overleaf API error:", error);
+          setError("Failed to open in Overleaf. Please try again.");
+        }
 
-      // Open in new tab
-      // console.log("Opening Overleaf...");
-      // window.open(overleafUrl, "_blank");
-
-      // --- NEW: Use POST request via a temporary form ---
-      console.log("Creating temporary form for Overleaf POST...");
-      const form = document.createElement("form");
-      form.action = "https://www.overleaf.com/docs";
-      form.method = "post";
-      form.target = "_blank"; // Open Overleaf in a new tab
-      form.style.display = "none"; // Hide the form
-
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "snip_uri";
-      input.value = dataUrl; // Send the base64 data URL
-      form.appendChild(input);
-
-      // Add optional parameters (example: set engine)
-      // const engineInput = document.createElement('input');
-      // engineInput.type = 'hidden';
-      // engineInput.name = 'engine';
-      // engineInput.value = 'pdflatex'; // Or xelatex, lualatex
-      // form.appendChild(engineInput);
-
-      document.body.appendChild(form);
-      form.submit();
-      document.body.removeChild(form); // Clean up the form
-      console.log("Submitted form to Overleaf.");
-      // --- END NEW ---
-    } catch (error: any) {
-      console.error("Overleaf export error:", error);
-      let errorMessage = "Failed to generate Overleaf link.";
-      if (error.response?.data?.details) {
-        errorMessage += ` Details: ${error.response.data.details}`;
-      } else if (error.message) {
-        errorMessage += ` Details: ${error.message}`;
-      }
-      setError(errorMessage);
-    } finally {
+        setOverleafLoading(false);
+      };
+    } catch (error) {
+      console.error("Export error:", error);
+      setError("Failed to export the document. Please try again.");
       setOverleafLoading(false);
     }
   };
 
-  if (!project) {
-    return <div className="p-8 text-center">No project loaded</div>;
-  }
+  // Helper function to check if a block type is available in the current template
+  const isBlockTypeAvailable = (type: BlockType): boolean => {
+    if (!templateConfig) return true; // If no template, allow all blocks
+    if (!templateConfig.requiredBlocks && !templateConfig.defaultBlocks)
+      return true; // If no restrictions, allow all
+
+    // Check if it's in the requiredBlocks or defaultBlocks arrays
+    return (
+      templateConfig.requiredBlocks?.includes(type as any) ||
+      false ||
+      templateConfig.defaultBlocks?.includes(type as any) ||
+      false
+    );
+  };
+
+  // Helper function to get a friendly name for a block type
+  const getBlockTypeName = (type: BlockType): string => {
+    const nameMap: Record<string, string> = {
+      "title-page": "Title Page",
+      abstract: "Abstract",
+      acknowledgments: "Acknowledgments",
+      dedication: "Dedication",
+      chapter: "Chapter",
+      section: "Section",
+      paragraph: "Paragraph",
+      figure: "Figure",
+      table: "Table",
+      code: "Code Block",
+      equation: "Equation",
+      "list-of-figures": "List of Figures",
+      "list-of-tables": "List of Tables",
+      "list-of-abbreviations": "List of Abbreviations",
+      glossary: "Glossary",
+      bibliography: "Bibliography",
+      appendix: "Appendix",
+      appendices: "Appendices",
+      cv: "Curriculum Vitae",
+    };
+
+    return nameMap[type] || type;
+  };
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header/Toolbar */}
-      <header className="bg-gray-800 text-white p-4">
-        <div className="container mx-auto flex justify-between items-center">
-          <div className="flex items-center">
-            <button
-              onClick={() => {
-                // Clear the project from store
-                useDocumentStore.setState({ project: null });
-              }}
-              className="px-3 py-1 bg-gray-600 rounded hover:bg-gray-700 mr-4"
-              title="Return to home page"
+    <div className="flex flex-col h-screen bg-white">
+      {/* Top navigation bar */}
+      <header className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3 flex items-center shadow-md">
+        <button
+          onClick={() => {
+            resetStore();
+            window.location.href = "/";
+          }}
+          className="mr-4 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-md transition-colors flex items-center text-sm"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4 mr-1.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10 19l-7-7m0 0l7-7m-7 7h18"
+            />
+          </svg>
+          Home
+        </button>
+        <h1 className="text-lg font-medium flex-1">
+          {project?.title || "Document"}
+        </h1>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={saveProject}
+            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-md transition-colors flex items-center text-sm"
+            disabled={isLoading}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-4 w-4 mr-1.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              Home
-            </button>
-            <h1 className="text-xl font-bold">{project.title}</h1>
-          </div>
-          <div className="flex space-x-2 flex-wrap">
-            <button
-              onClick={checkLatexInstallation}
-              className={`px-4 py-2 rounded ${
-                latexStatus === "found"
-                  ? "bg-green-600 hover:bg-green-700"
-                  : latexStatus === "not-found"
-                  ? "bg-red-600 hover:bg-red-700"
-                  : latexStatus === "checking"
-                  ? "bg-yellow-600 hover:bg-yellow-700"
-                  : "bg-gray-600 hover:bg-gray-700"
-              }`}
-              disabled={latexStatus === "checking"}
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+              />
+            </svg>
+            Save
+          </button>
+
+          <button
+            onClick={handleExport}
+            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-md transition-colors flex items-center text-sm"
+            disabled={isLoading}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-4 w-4 mr-1.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              {latexStatus === "checking"
-                ? "Checking LaTeX..."
-                : latexStatus === "found"
-                ? "LaTeX Installed"
-                : latexStatus === "not-found"
-                ? "LaTeX Not Found"
-                : "Check LaTeX"}
-            </button>
-            <button
-              onClick={handleTestCompile}
-              className={`px-4 py-2 rounded ${
-                testCompileStatus === "success"
-                  ? "bg-green-600 hover:bg-green-700"
-                  : testCompileStatus === "error"
-                  ? "bg-red-600 hover:bg-red-700"
-                  : testCompileStatus === "loading"
-                  ? "bg-yellow-600 hover:bg-yellow-700"
-                  : "bg-teal-600 hover:bg-teal-700"
-              }`}
-              disabled={testCompileStatus === "loading"}
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              />
+            </svg>
+            Export
+          </button>
+
+          <button
+            onClick={viewLatexSource}
+            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-md transition-colors flex items-center text-sm"
+            disabled={latexSourceLoading}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-4 w-4 mr-1.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              {testCompileStatus === "loading"
-                ? "Testing..."
-                : testCompileStatus === "success"
-                ? "Test Passed"
-                : testCompileStatus === "error"
-                ? "Test Failed"
-                : "Test Compile"}
-            </button>
-            <button
-              onClick={runLatexDiagnostics}
-              className={`px-4 py-2 rounded ${
-                diagnosticsLoading
-                  ? "bg-yellow-600 hover:bg-yellow-700"
-                  : "bg-indigo-600 hover:bg-indigo-700"
-              }`}
-              disabled={diagnosticsLoading}
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+              />
+            </svg>
+            {latexSourceLoading ? "Loading..." : "View LaTeX"}
+          </button>
+
+          <button
+            onClick={handleOpenInOverleaf}
+            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-md transition-colors flex items-center text-sm"
+            disabled={overleafLoading}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-4 w-4 mr-1.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              {diagnosticsLoading ? "Running..." : "Diagnostics"}
-            </button>
-            <button
-              onClick={viewLatexSource}
-              className={`px-4 py-2 rounded ${
-                latexSourceLoading
-                  ? "bg-yellow-600 hover:bg-yellow-700"
-                  : "bg-orange-600 hover:bg-orange-700"
-              }`}
-              disabled={latexSourceLoading}
-            >
-              {latexSourceLoading ? "Loading..." : "View LaTeX"}
-            </button>
-            <button
-              onClick={() => saveProject()}
-              className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700"
-            >
-              Save
-            </button>
-            <button
-              onClick={handleCompile}
-              className="px-4 py-2 bg-green-600 rounded hover:bg-green-700"
-            >
-              Compile PDF
-            </button>
-            <button
-              onClick={handleExport}
-              className="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700"
-            >
-              Export ZIP
-            </button>
-            <button
-              onClick={handleOpenInOverleaf}
-              className={`px-4 py-2 rounded ${
-                overleafLoading
-                  ? "bg-yellow-600"
-                  : "bg-cyan-600 hover:bg-cyan-700"
-              }`}
-              disabled={overleafLoading}
-            >
-              {overleafLoading ? "Generating..." : "Open in Overleaf"}
-            </button>
-          </div>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
+            </svg>
+            {overleafLoading ? "Loading..." : "Open in Overleaf"}
+          </button>
         </div>
       </header>
 
-      {/* Tab Navigation */}
-      <div className="bg-gray-100 border-b">
-        <div className="container mx-auto">
-          <div className="flex">
+      {error && (
+        <div className="mx-4 mt-2 text-red-600 bg-red-50 px-4 py-2 rounded-md border border-red-200 text-sm flex items-center">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4 mr-1.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
+          </svg>
+          {error}
+        </div>
+      )}
+
+      {/* Main content area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left sidebar - Block list & controls */}
+        <div className="w-64 bg-gray-50 flex flex-col border-r border-gray-200">
+          {/* Navigation tabs */}
+          <div className="flex border-b border-gray-200">
             <button
-              onClick={() => setActiveTab("blocks")}
-              className={`px-4 py-2 ${
+              className={`flex-1 py-2.5 text-sm font-medium ${
                 activeTab === "blocks"
-                  ? "bg-white border-t border-l border-r"
-                  : "bg-gray-200 hover:bg-gray-300"
+                  ? "text-blue-600 border-b-2 border-blue-500"
+                  : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
               }`}
+              onClick={() => setActiveTab("blocks")}
             >
               Blocks
             </button>
             <button
-              onClick={() => setActiveTab("references")}
-              className={`px-4 py-2 ${
+              className={`flex-1 py-2.5 text-sm font-medium ${
                 activeTab === "references"
-                  ? "bg-white border-t border-l border-r"
-                  : "bg-gray-200 hover:bg-gray-300"
+                  ? "text-blue-600 border-b-2 border-blue-500"
+                  : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
               }`}
+              onClick={() => setActiveTab("references")}
             >
               References
             </button>
             <button
-              onClick={() => setActiveTab("preview")}
-              className={`px-4 py-2 ${
+              className={`flex-1 py-2.5 text-sm font-medium ${
                 activeTab === "preview"
-                  ? "bg-white border-t border-l border-r"
-                  : "bg-gray-200 hover:bg-gray-300"
+                  ? "text-blue-600 border-b-2 border-blue-500"
+                  : "text-gray-600 hover:text-gray-800 hover:bg-gray-100"
               }`}
+              onClick={() => setActiveTab("preview")}
             >
               Preview
             </button>
           </div>
+
+          {/* Tab content */}
+          <div className="flex-1 overflow-y-auto">
+            {activeTab === "blocks" && (
+              <div className="p-3">
+                {/* Add Block button with dropdown */}
+                <div className="relative mb-3">
+                  <button
+                    onClick={() => setAddMenuOpen(!addMenuOpen)}
+                    className="w-full px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-md hover:from-blue-700 hover:to-indigo-700 transition-colors flex items-center justify-center text-sm shadow-sm"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4 mr-1.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+                    Add Block
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-4 w-4 ml-1"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d={addMenuOpen ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"}
+                      />
+                    </svg>
+                  </button>
+
+                  {addMenuOpen && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-96 overflow-y-auto">
+                      {blockMenuCategories.map((category) => (
+                        <div key={category.name} className="p-2">
+                          <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider px-2 mb-1">
+                            {category.name}
+                          </h3>
+                          <div>
+                            {category.types.map((type) => {
+                              // Only show block types that are available in the current template
+                              const available = isBlockTypeAvailable(
+                                type as BlockType
+                              );
+
+                              return available ? (
+                                <button
+                                  key={type}
+                                  onClick={() =>
+                                    handleAddBlock(type as BlockType)
+                                  }
+                                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 rounded-md transition-colors flex items-center"
+                                >
+                                  {getBlockTypeName(type as BlockType)}
+                                </button>
+                              ) : null;
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Block list */}
+                <DragDropContext onDragEnd={handleDragEnd}>
+                  <BlockList />
+                </DragDropContext>
+              </div>
+            )}
+
+            {activeTab === "references" && <ReferenceManager />}
+
+            {activeTab === "preview" && (
+              <div className="h-full">
+                <LivePreview url={previewUrl} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Main editor area */}
+        <div className="flex-1 overflow-auto bg-white">
+          {selectedBlockId ? (
+            <BlockEditor blockId={selectedBlockId} />
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8">
+              <div className="bg-gray-50 rounded-lg p-10 flex flex-col items-center max-w-md text-center shadow-sm border border-gray-100">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-16 w-16 mb-4 text-gray-300"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+                <h2 className="text-lg font-medium text-gray-700 mb-2">
+                  No Block Selected
+                </h2>
+                <p className="text-sm text-gray-500">
+                  Select a block from the list to edit or add a new block using
+                  the button above.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
-        {testError && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded m-4">
-            <p className="font-bold">Test Compilation Error</p>
-            <p className="whitespace-pre-wrap font-mono text-sm">{testError}</p>
-            <p className="mt-2 text-sm">
-              <strong>Troubleshooting tips:</strong>
-            </p>
-            <ul className="list-disc ml-5 text-sm">
-              <li>Make sure MiKTeX is properly installed</li>
-              <li>Verify that pdflatex is in your system PATH</li>
-              <li>Try restarting your computer after installing MiKTeX</li>
-              <li>
-                Check if MiKTeX package manager is working (not blocked by
-                antivirus)
-              </li>
-              <li>Try running pdflatex manually in a command prompt</li>
-            </ul>
-          </div>
-        )}
-
-        {latexSource && (
-          <div className="bg-white border border-gray-300 p-4 rounded m-4 overflow-auto max-h-96">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="font-bold">Generated LaTeX Source</h3>
+      {/* LaTeX Source Modal */}
+      {latexSource && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] flex flex-col shadow-xl">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-800">
+                LaTeX Source
+              </h2>
               <button
                 onClick={() => setLatexSource(null)}
-                className="px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 text-xs"
+                className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100 transition-colors duration-200"
               >
-                Close
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
               </button>
             </div>
-            <pre className="text-sm font-mono bg-gray-50 p-4 rounded overflow-auto">
-              {latexSource}
-            </pre>
-          </div>
-        )}
-
-        {diagnostics && (
-          <div className="bg-blue-50 border border-blue-300 text-blue-800 px-4 py-3 rounded m-4">
-            <div className="flex justify-between items-center">
-              <p className="font-bold">LaTeX Environment Diagnostics</p>
+            <div className="p-4 overflow-auto flex-1">
+              <pre className="bg-gray-50 p-4 rounded-md text-sm font-mono whitespace-pre-wrap text-gray-800 border border-gray-200">
+                {latexSource}
+              </pre>
+            </div>
+            <div className="p-4 border-t flex justify-end bg-gray-50">
               <button
-                onClick={() => setDiagnostics(null)}
-                className="px-2 py-1 bg-blue-200 rounded hover:bg-blue-300 text-xs"
+                onClick={() => setLatexSource(null)}
+                className="px-4 py-2 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors duration-200 text-gray-800"
               >
                 Close
               </button>
             </div>
-            <div className="mt-2 overflow-auto max-h-96">
-              <div className="mb-3">
-                <p className="font-semibold">System Information:</p>
-                <p className="text-sm">
-                  OS: {diagnostics.os.platform} {diagnostics.os.release}
-                </p>
-                <p className="text-sm">Architecture: {diagnostics.os.arch}</p>
-                <p className="text-sm">Node: {diagnostics.node.version}</p>
-              </div>
-
-              <div className="mb-3">
-                <p className="font-semibold">LaTeX Installation:</p>
-                <p className="text-sm">
-                  Installed: {diagnostics.latex.installed ? "Yes" : "No"}
-                </p>
-                {diagnostics.latex.path && (
-                  <p className="text-sm">Path: {diagnostics.latex.path}</p>
-                )}
-                {diagnostics.latex.version && (
-                  <p className="text-sm whitespace-pre-wrap">
-                    Version: {diagnostics.latex.version.split("\n")[0]}
-                  </p>
-                )}
-                {diagnostics.latex.error && (
-                  <p className="text-sm text-red-700">
-                    Error: {diagnostics.latex.error}
-                  </p>
-                )}
-              </div>
-
-              {process.platform === "win32" && (
-                <div className="mb-3">
-                  <p className="font-semibold">MiKTeX:</p>
-                  <p className="text-sm">
-                    Detected: {diagnostics.miktex.detected ? "Yes" : "No"}
-                  </p>
-                  {diagnostics.miktex.path && (
-                    <p className="text-sm">Path: {diagnostics.miktex.path}</p>
-                  )}
-                  {diagnostics.miktex.version && (
-                    <p className="text-sm whitespace-pre-wrap">
-                      Version: {diagnostics.miktex.version.split("\n")[0]}
-                    </p>
-                  )}
-                  {diagnostics.miktex.error && (
-                    <p className="text-sm text-red-700">
-                      Error: {diagnostics.miktex.error}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="mb-3">
-                <p className="font-semibold">Verification Steps:</p>
-                <ul className="list-disc ml-5 text-sm">
-                  {diagnostics.verificationSteps.map(
-                    (step: string, i: number) => (
-                      <li key={i}>{step}</li>
-                    )
-                  )}
-                </ul>
-              </div>
-            </div>
           </div>
-        )}
-
-        {activeTab === "blocks" && (
-          <div className="container mx-auto h-full flex">
-            {/* Sidebar with block list */}
-            <div className="w-1/3 border-r overflow-y-auto p-4">
-              <div className="mb-4">
-                <h2 className="text-lg font-semibold mb-2">Add Block</h2>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleAddBlock("title-page")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Title Page
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("abstract")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Abstract
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("chapter")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Chapter
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("section")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Section
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("figure")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Figure
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("table")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Table
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("bibliography")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Bibliography
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("summary")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Summary
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("appendices")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    Appendices
-                  </button>
-                  <button
-                    onClick={() => handleAddBlock("cv")}
-                    className="px-3 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm"
-                  >
-                    CV
-                  </button>
-                </div>
-              </div>
-
-              <h2 className="text-lg font-semibold mb-2">Document Structure</h2>
-              <DragDropContext onDragEnd={handleDragEnd}>
-                <BlockList />
-              </DragDropContext>
-            </div>
-
-            {/* Block editor */}
-            <div className="w-2/3 p-4 overflow-y-auto">
-              {selectedBlockId ? (
-                <BlockEditor blockId={selectedBlockId} />
-              ) : (
-                <div className="text-center p-8 text-gray-500">
-                  Select a block to edit or add a new block
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {activeTab === "references" && (
-          <div className="container mx-auto p-4">
-            <ReferenceManager />
-          </div>
-        )}
-
-        {activeTab === "preview" && (
-          <div className="container mx-auto p-4 h-full">
-            <LivePreview url={previewUrl} />
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

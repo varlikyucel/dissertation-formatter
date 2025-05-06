@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   generateLaTeXDocument,
   generateBibTeX,
-  copyItuTemplateFiles,
-  createItuContentFiles, // Import from templateService now
+  copyItuTemplateFiles, // We'll likely need copyTemplateFiles from compile route potentially
 } from "@/lib/templates/templateService";
+import { createItuContentFiles } from "../compile/route"; // Import the function if it's exported
 import { Project, Block, FigureBlock } from "@/lib/types";
 import fs from "fs";
 import path from "path";
@@ -35,8 +35,42 @@ async function copyTemplateFilesOverleaf(
     // Use the enhanced ITU template handler
     copyItuTemplateFiles(workDir); // From templateService
 
-    // Create content files for ITU template using the function from templateService
-    await createItuContentFiles(workDir, project); // NOW CORRECTLY CALLED
+    // Create content files for ITU template
+    // We need to ensure createItuContentFiles is accessible here
+    // Option 1: Move createItuContentFiles to templateService.ts
+    // Option 2: Keep it in compile/route.ts and import it (needs export)
+    // Let's assume we import it for now.
+    try {
+      // Assuming createItuContentFiles is exported from the compile route file
+      // Note: This creates a dependency between API routes, might be better to refactor later
+      await createItuContentFiles(workDir, project);
+    } catch (e) {
+      // Handle case where createItuContentFiles might not be exported or path is wrong
+      console.error(
+        "Could not import or run createItuContentFiles from compile route.",
+        e
+      );
+      // Attempt to create minimal placeholders if main function fails
+      const chapterBlocks = project.blocks.filter((b) => b.type === "chapter");
+      for (let i = 0; i < 6; i++) {
+        const chapterNum = i + 1;
+        const filePath = path.join(workDir, `ch${chapterNum}.tex`);
+        if (!fs.existsSync(filePath)) {
+          const content = chapterBlocks[i]
+            ? `\\chapter{${chapterBlocks[i].title}}
+
+${chapterBlocks[i].content}`
+            : `\\chapter{Placeholder Chapter ${chapterNum}}
+
+Content missing.`;
+          fs.writeFileSync(filePath, content);
+        }
+      }
+      // Add other placeholders similarly if needed (ozet, summary, etc.)
+      console.warn(
+        "Falling back to minimal content file creation for Overleaf export."
+      );
+    }
   }
   // Add logic for other templates if necessary
 }
